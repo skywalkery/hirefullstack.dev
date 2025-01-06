@@ -1,0 +1,207 @@
+<div class="container">
+  <canvas id="backgroundCanvas"></canvas>
+</div>
+
+<style>
+  .container {
+    position: fixed;
+    inset: 0;
+  }
+
+  #backgroundCanvas {
+    width: 100%;
+    height: 100%;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --grid-line: rgba(255, 255, 255, 0.075);
+      --highlight: oklch(0.7 0.15 264);
+    }
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --grid-line: rgba(0, 0, 0, 0.075);
+      --highlight: oklch(0.65 0.15 264);
+    }
+  }
+</style>
+
+<script>
+  const CELL_SIZE = 40;
+
+  const NEIGHBOR_OFFSETS = [
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
+    [-1, -1],
+    [-1, 1],
+    [1, -1],
+    [1, 1],
+  ] as const;
+
+  const getCSSVariable = (name: string) =>
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  const getCanvasColors = () => ({
+    gridLine: getCSSVariable("--grid-line"),
+    highlight: getCSSVariable("--highlight"),
+  });
+
+  function createGrid(
+    canvas: HTMLCanvasElement,
+    gridCanvas: HTMLCanvasElement
+  ) {
+    const ctx = canvas.getContext("2d");
+    const gridCtx = gridCanvas.getContext("2d");
+    if (!ctx || !gridCtx) return;
+
+    const state = {
+      highlightedCells: [] as {
+        row: number;
+        col: number;
+        expiration: number;
+      }[],
+      canvasColors: getCanvasColors(),
+      isMotionReduced: window.matchMedia("(prefers-reduced-motion: reduce)")
+        .matches,
+      cols: 0,
+      rows: 0,
+    };
+
+    const highlightCell = (row: number, col: number) => {
+      if (row < 0 || col < 0 || row >= state.rows || col >= state.cols) return;
+
+      // Un-highlight cell after 300-500ms
+      const expiration = performance.now() + 500 - Math.random() * 200;
+
+      const highlightedCell = state.highlightedCells.find(
+        (cell) => cell.row === row && cell.col === col
+      );
+      if (highlightedCell) {
+        highlightedCell.expiration = expiration;
+      } else {
+        state.highlightedCells.push({ row, col, expiration });
+      }
+    };
+
+    const getNeighbors = (row: number, col: number) => {
+      return NEIGHBOR_OFFSETS.map(
+        ([dr, dc]) => [row + dr, col + dc] as const
+      ).filter(
+        ([r, c]) => r >= 0 && r < state.rows && c >= 0 && c < state.cols
+      );
+    };
+
+    const drawGridLines = () => {
+      gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+
+      gridCtx.strokeStyle = state.canvasColors.gridLine;
+      gridCtx.lineWidth = 1;
+
+      for (let row = 0; row < state.rows; row++) {
+        for (let col = 0; col < state.cols; col++) {
+          const x = col * CELL_SIZE;
+          const y = row * CELL_SIZE;
+          gridCtx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
+        }
+      }
+    };
+
+    const drawHighlights = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(gridCanvas, 0, 0);
+
+      ctx.strokeStyle = state.canvasColors.highlight;
+      ctx.lineWidth = 1;
+
+      state.highlightedCells.forEach(({ row, col }) => {
+        const x = col * CELL_SIZE;
+        const y = row * CELL_SIZE;
+        ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
+      });
+    };
+
+    const updateHighlights = () => {
+      const now = performance.now();
+      state.highlightedCells = state.highlightedCells.filter(
+        (cell) => cell.expiration > now
+      );
+      drawHighlights();
+      requestAnimationFrame(updateHighlights);
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (state.isMotionReduced) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const localX = e.clientX - rect.left;
+      const localY = e.clientY - rect.top;
+
+      const col = Math.floor(localX / CELL_SIZE);
+      const row = Math.floor(localY / CELL_SIZE);
+
+      highlightCell(row, col);
+
+      // Highlight random neighbor cell
+      const neighbors = getNeighbors(row, col);
+      if (neighbors.length > 0) {
+        const [nRow, nCol] =
+          neighbors[Math.floor(Math.random() * neighbors.length)]!;
+        highlightCell(nRow, nCol);
+      }
+    };
+
+    const onResize = () => {
+      canvas.width = canvas.clientWidth;
+      canvas.height = canvas.clientHeight;
+
+      gridCanvas.width = canvas.width;
+      gridCanvas.height = canvas.height;
+
+      state.cols = Math.ceil(canvas.width / CELL_SIZE);
+      state.rows = Math.ceil(canvas.height / CELL_SIZE);
+
+      drawGridLines();
+    };
+
+    const initEventListeners = () => {
+      const colorSchemeMedia = window.matchMedia(
+        "(prefers-color-scheme: dark)"
+      );
+      colorSchemeMedia.addEventListener("change", () => {
+        state.canvasColors = getCanvasColors();
+        drawGridLines();
+        drawHighlights();
+      });
+
+      const motionMedia = window.matchMedia("(prefers-reduced-motion: reduce)");
+      motionMedia.addEventListener("change", () => {
+        state.isMotionReduced = motionMedia.matches;
+      });
+
+      window.addEventListener("resize", onResize);
+      canvas.addEventListener("mousemove", onMouseMove);
+    };
+
+    const start = () => {
+      onResize();
+      updateHighlights();
+    };
+
+    initEventListeners();
+    start();
+  }
+
+  function init() {
+    const canvas = document.getElementById("backgroundCanvas");
+    if (!(canvas instanceof HTMLCanvasElement)) return;
+
+    const gridCanvas = document.createElement("canvas");
+    createGrid(canvas, gridCanvas);
+  }
+
+  init();
+</script>
